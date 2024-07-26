@@ -3,7 +3,7 @@
   <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
 </p>
 
-## Description
+## Descrição
 
  Este é um serviço RESTful desenvolvido com [NestJs](https://github.com/nestjs/nest) para gerenciar e analisar filmes premiados pelo Golden Raspberry Awards, especificamente na categoria "Pior Filme". O objetivo principal deste aplicativo é permitir a leitura de uma lista de filmes a partir de um arquivo CSV e fornecer informações sobre os produtores e os intervalos entre os prêmios.
 
@@ -27,6 +27,10 @@
 
 ## Endpoints
 <b> GET /movies/prize-intervals: </b> Retorna os produtores e os intervalos entre prêmios, conforme calculado a partir dos dados importados.
+
+```sh
+curl -X GET http://localhost:3000/movies/prize-intervals
+```
 
 ## Instalação
 
