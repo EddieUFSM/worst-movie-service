@@ -1,4 +1,4 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Movie } from './entities/movie.entity';
@@ -43,12 +43,28 @@ export class MovieService implements OnModuleInit {
 
   async importMoviesFromCSV(filePath: string): Promise<void> {
     const results: any[] = [];
+
     fs.createReadStream(filePath)
-      .pipe(csv({ separator: ';' })) // Configurando o delimitador como ';'
+      .pipe(csv({ separator: ';' })) // Configura o delimitador como ';'
       .on('data', (data) => {
-        results.push(data);
+        // Processa a string de produtores para uma array de strings
+        const producersArray = data.producers
+          ? data.producers.split(',').map((producer: string) => producer.trim())
+          : [];
+
+        // Verifica o valor do 'winner' e o transforma em um booleano
+        const winner =
+          data.winner && data.winner.trim().toLowerCase() === 'yes';
+
+        results.push({
+          ...data,
+          producers: producersArray,
+          winner,
+        });
       })
       .on('end', async () => {
+        Logger.debug(`Imported ${results.length} movies`, 'Debug');
+
         for (const row of results) {
           try {
             await this.movieRepository.save({
@@ -89,7 +105,7 @@ export class MovieService implements OnModuleInit {
 
   private async getOrderedMovies(): Promise<Movie[]> {
     return this.movieRepository.find({
-      order: { producers: 'ASC', year: 'ASC' },
+      order: { year: 'ASC' },
     });
   }
 
@@ -97,10 +113,12 @@ export class MovieService implements OnModuleInit {
     const producerIntervals = new Map<string, number[]>();
 
     movies.forEach((movie) => {
-      if (!producerIntervals.has(movie.producers)) {
-        producerIntervals.set(movie.producers, []);
-      }
-      producerIntervals.get(movie.producers)!.push(movie.year);
+      movie.producers.forEach((producer) => {
+        if (!producerIntervals.has(producer)) {
+          producerIntervals.set(producer, []);
+        }
+        producerIntervals.get(producer)!.push(movie.year);
+      });
     });
 
     return producerIntervals;
@@ -109,8 +127,8 @@ export class MovieService implements OnModuleInit {
   private calculateIntervals(
     producerIntervals: Map<string, number[]>,
   ): IntervalResult {
-    let minInterval = Infinity;
-    let maxInterval = -Infinity;
+    let overallMinInterval = Infinity;
+    let overallMaxInterval = -Infinity;
     const minIntervalProducers = new Set<string>();
     const maxIntervalProducers = new Set<string>();
     const intervalDetails: {
@@ -118,57 +136,76 @@ export class MovieService implements OnModuleInit {
     } = {};
 
     producerIntervals.forEach((years, producer) => {
+      if (years.length < 2) {
+        // Não há intervalo se o produtor tem menos de dois prêmios
+        return;
+      }
+
+      // Ordenar os anos
+      years.sort((a, b) => a - b);
+
+      let producerMinInterval = Infinity;
+      let producerMaxInterval = -Infinity;
+      let minIntervalDetail: IntervalDetail | undefined;
+      let maxIntervalDetail: IntervalDetail | undefined;
+
+      // Calcular intervalos entre anos consecutivos
       for (let i = 0; i < years.length - 1; i++) {
-        for (let j = i + 1; j < years.length; j++) {
-          const interval = years[j] - years[i];
+        const interval = years[i + 1] - years[i];
 
-          if (interval > 0) {
-            // Filtra intervalos zero
-            // Atualiza o menor intervalo
-            if (interval < minInterval) {
-              minInterval = interval;
-              minIntervalProducers.clear();
-              minIntervalProducers.add(producer);
-              intervalDetails[producer] = {
-                interval,
-                previousWin: years[i],
-                followingWin: years[j],
-              };
-            } else if (interval === minInterval) {
-              minIntervalProducers.add(producer);
-              intervalDetails[producer] = {
-                interval,
-                previousWin: years[i],
-                followingWin: years[j],
-              };
-            }
-
-            // Atualiza o maior intervalo
-            if (interval > maxInterval) {
-              maxInterval = interval;
-              maxIntervalProducers.clear();
-              maxIntervalProducers.add(producer);
-              intervalDetails[producer] = {
-                interval,
-                previousWin: years[i],
-                followingWin: years[j],
-              };
-            } else if (interval === maxInterval) {
-              maxIntervalProducers.add(producer);
-              intervalDetails[producer] = {
-                interval,
-                previousWin: years[i],
-                followingWin: years[j],
-              };
-            }
+        if (interval > 0) {
+          // Filtra intervalos zero
+          // Atualiza o menor intervalo para este produtor
+          if (interval < producerMinInterval) {
+            producerMinInterval = interval;
+            minIntervalDetail = {
+              interval,
+              previousWin: years[i],
+              followingWin: years[i + 1],
+            };
           }
+
+          // Atualiza o maior intervalo para este produtor
+          if (interval > producerMaxInterval) {
+            producerMaxInterval = interval;
+            maxIntervalDetail = {
+              interval,
+              previousWin: years[i],
+              followingWin: years[i + 1],
+            };
+          }
+        }
+      }
+
+      // Atualiza o menor e maior intervalo globalmente
+      if (minIntervalDetail) {
+        if (producerMinInterval < overallMinInterval) {
+          overallMinInterval = producerMinInterval;
+          minIntervalProducers.clear();
+          minIntervalProducers.add(producer);
+          intervalDetails[producer] = minIntervalDetail;
+        } else if (producerMinInterval === overallMinInterval) {
+          minIntervalProducers.add(producer);
+          intervalDetails[producer] = minIntervalDetail;
+        }
+      }
+
+      if (maxIntervalDetail) {
+        if (producerMaxInterval > overallMaxInterval) {
+          overallMaxInterval = producerMaxInterval;
+          maxIntervalProducers.clear();
+          maxIntervalProducers.add(producer);
+          intervalDetails[producer] = maxIntervalDetail;
+        } else if (producerMaxInterval === overallMaxInterval) {
+          maxIntervalProducers.add(producer);
+          intervalDetails[producer] = maxIntervalDetail;
         }
       }
     });
 
     return {
-      minInterval,
-      maxInterval,
+      minInterval: overallMinInterval,
+      maxInterval: overallMaxInterval,
       minIntervalProducers,
       maxIntervalProducers,
       intervalDetails,

@@ -14,8 +14,8 @@ export class Movie {
   @Column()
   studios: string;
 
-  @Column()
-  producers: string;
+  @Column('simple-array')
+  producers: string[];
 
   @Column()
   winner: string;
